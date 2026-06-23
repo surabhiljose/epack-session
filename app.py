@@ -156,6 +156,10 @@ st.markdown("""
   #MainMenu, header[data-testid="stHeader"], footer { display: none; }
   .block-container { padding: 1.4rem 2rem 2rem; max-width: 1280px; }
   .stApp { background: #ffffff; }
+  /* Keep content crisp during the background refresh — no blur/fade on stale elements */
+  [data-stale="true"] { opacity: 1 !important; transition: none !important; filter: none !important; }
+  .stApp [data-testid="stStatusWidget"] { display: none !important; }
+  [data-testid="stSpinner"] { display: none !important; }
   :root {
     --ink:#16181d; --muted:#6b7280; --faint:#9aa1ad; --line:#ededf1; --line-2:#f4f5f7;
     --yellow:#f5c518; --yellow-dk:#c79700; --yellow-sf:#fff7d6;
@@ -245,9 +249,22 @@ def session_html(r):
 
 
 # ----------------------------------------------------------------------------- controls
-c1, c2, _ = st.columns([1, 1, 6])
+c1, c2, _, c4 = st.columns([1, 1, 4, 1.5])
 device = c1.text_input("Device ID", value="11")
 since = c2.text_input("Since", value="2026-06-21")
+c4.write("")
+fs = c4.toggle("⛶ Fullscreen", value=False, key="fs")
+
+# When on, the session board fills the whole screen (controls stay so you can exit).
+if fs:
+    st.markdown("""
+    <style>
+      .ep-head { display: none !important; }
+      .block-container { padding-top: .6rem !important; max-width: 100% !important; }
+      .board { height: calc(100vh - 78px); overflow-y: auto; }
+      .board-head { position: sticky; top: 0; background: #fff; z-index: 5; }
+    </style>
+    """, unsafe_allow_html=True)
 
 
 # ----------------------------------------------------------------------------- board (auto-refresh)
