@@ -243,9 +243,7 @@ def session_html(r):
       <div class="sess {st_}{' live' if live else ''}">
         <div class="ident">
           <div class="stcol"></div>
-          <div class="id-main">{top}
-            <div class="epk">ePack #{r['epack_id'] or '—'}<span class="dev">device {r['device_id']}</span></div>
-          </div>
+          <div class="id-main">{top}</div>
         </div>
         <div class="metrics">
           <div class="seg"><div class="lbl">Time</div><div class="val">{fmt_time(r['session_started_at'])}<span class="arr">→</span>{fmt_time(r['session_ended_at'])}</div></div>
