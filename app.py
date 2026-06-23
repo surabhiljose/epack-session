@@ -178,6 +178,8 @@ st.markdown("""
   .board-head .accent { width:28px; height:4px; border-radius:2px; background:var(--yellow); }
   .board-head h2 { margin:0; font-size:14.5px; font-weight:750; color:var(--ink); }
   .board-head .count { font-size:12px; color:var(--faint); }
+  .fsbtn { margin-left:auto; text-decoration:none; font-size:12.5px; font-weight:600; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:9px; padding:6px 12px; white-space:nowrap; }
+  .fsbtn:hover { border-color:var(--yellow); background:var(--yellow-sf); }
 
   .sess { display:flex; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line-2); }
   .sess:last-child { border-bottom:none; }
@@ -187,7 +189,13 @@ st.markdown("""
   .sess.discharging .stcol { background:#ef7234; }
   .sess.standby .stcol { background:#b6bcc7; }
   .id-main { display:flex; flex-direction:column; gap:6px; }
-  .pill { font-size:11.5px; font-weight:650; text-transform:capitalize; padding:3px 10px; border-radius:7px; background:#f1f2f4; color:#4b5563; width:fit-content; }
+  .id-top { display:flex; align-items:center; gap:8px; }
+  .pill { font-size:11.5px; font-weight:700; text-transform:capitalize; padding:3px 10px; border-radius:7px; background:#f1f2f4; color:#4b5563; width:fit-content; }
+  .pill.charging { background:#fef3da; color:#b45309; }
+  .pill.discharging { background:#fde7dc; color:#c2410c; }
+  .pill.standby { background:#eef0f3; color:#5b6472; }
+  .live-chip { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:800; letter-spacing:.8px; text-transform:uppercase; color:#fff; background:var(--green); border-radius:7px; padding:3px 9px; }
+  .live-chip .pulse { width:6px; height:6px; border-radius:50%; background:#fff; animation:ping 1.3s infinite; }
   .epk { font-size:14px; font-weight:700; letter-spacing:-.2px; color:var(--ink); }
   .epk .dev { color:var(--faint); font-weight:500; font-size:12px; margin-left:7px; }
 
@@ -225,15 +233,17 @@ def session_html(r):
     kpk = num(r["kwh_per_km"])
     fx = lambda v, dp: f"{v:.{dp}f}" if v is not None else "—"
     kpk_str = f"{kpk:.2f}" if kpk is not None else '<span class="faint">—</span>'
-    tag = ('<span class="live-pill"><span class="pulse"></span>Live</span>' if live
-           else f'<span class="pill">{st_}</span>')
+    # always show the status (charging/discharging/standby); live row also gets a green LIVE chip
+    status_pill = f'<span class="pill {st_}">{st_}</span>'
+    live_chip = '<span class="live-chip"><span class="pulse"></span>Live</span>' if live else ''
+    top = f'<div class="id-top">{status_pill}{live_chip}</div>'
     delta = (f'<div class="delta {"up" if dsoc >= 0 else "down"}">{"▲" if dsoc >= 0 else "▼"} {abs(dsoc):.1f}%</div>'
              if dsoc is not None else "")
     return f"""
       <div class="sess {st_}{' live' if live else ''}">
         <div class="ident">
           <div class="stcol"></div>
-          <div class="id-main">{tag}
+          <div class="id-main">{top}
             <div class="epk">ePack #{r['epack_id'] or '—'}<span class="dev">device {r['device_id']}</span></div>
           </div>
         </div>
@@ -249,19 +259,19 @@ def session_html(r):
 
 
 # ----------------------------------------------------------------------------- controls
-c1, c2, _, c4 = st.columns([1, 1, 4, 1.5])
+c1, c2, _ = st.columns([1, 1, 6])
 device = c1.text_input("Device ID", value="11")
 since = c2.text_input("Since", value="2026-06-21")
-c4.write("")
-fs = c4.toggle("⛶ Fullscreen", value=False, key="fs")
 
-# When on, the session board fills the whole screen (controls stay so you can exit).
-if fs:
+# Fullscreen = the sessions board only, as a full-page overlay (toggled via ?fs=1).
+FULLSCREEN = st.query_params.get("fs") == "1"
+if FULLSCREEN:
     st.markdown("""
     <style>
-      .ep-head { display: none !important; }
-      .block-container { padding-top: .6rem !important; max-width: 100% !important; }
-      .board { height: calc(100vh - 78px); overflow-y: auto; }
+      .ep-head, div[data-testid="stHorizontalBlock"] { display: none !important; }
+      .block-container { padding: 0 !important; max-width: 100% !important; }
+      .board { position: fixed; inset: 0; z-index: 99999; border: none; border-radius: 0;
+               height: 100vh; overflow-y: auto; box-shadow: none; }
       .board-head { position: sticky; top: 0; background: #fff; z-index: 5; }
     </style>
     """, unsafe_allow_html=True)
@@ -303,9 +313,12 @@ def board():
 
     ordered = list(reversed(rows))  # live / newest first
     cards = "".join(session_html(r) for r in ordered)
+    fs_now = st.query_params.get("fs") == "1"
+    fs_link = ('<a class="fsbtn" href="?fs=0" target="_self">✕ Exit fullscreen</a>' if fs_now
+               else '<a class="fsbtn" href="?fs=1" target="_self">⛶ Fullscreen</a>')
     st.markdown(f"""
       <div class="board">
-        <div class="board-head"><span class="accent"></span><h2>Sessions</h2><span class="count">{len(rows)} total</span></div>
+        <div class="board-head"><span class="accent"></span><h2>Sessions</h2><span class="count">{len(rows)} total</span>{fs_link}</div>
         {cards}
       </div>
     """, unsafe_allow_html=True)
