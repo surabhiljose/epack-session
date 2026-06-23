@@ -74,13 +74,13 @@ sessions as (
                  / (max_by(odo_read, source_timestamp) filter (where odo_read != 0) - min_by(odo_read, source_timestamp) filter (where odo_read != 0)) end as kwh_per_km,
         unix_timestamp(max(source_timestamp)) - unix_timestamp(min(source_timestamp)) as session_duration_seconds
     from src
-    group by bms_state, device_id, iot_project, session_window(source_timestamp, '4 minutes')
+    group by bms_state, device_id, iot_project, session_window(source_timestamp, '1 minute')
 )
 select (s.session_ended_at = m.max_end) as is_live, s.battery_status, s.device_id, s.epack_id,
        s.soc_start, s.soc_end, s.session_started_at, s.session_ended_at,
        s.odo_read_start, s.odo_read_end, s.energy_throughput_kwh, s.kwh_per_km
 from sessions s cross join (select max(session_ended_at) as max_end from sessions) m
-where s.session_duration_seconds >= 240 or s.session_ended_at = m.max_end
+where s.session_duration_seconds >= 60 or s.session_ended_at = m.max_end
 order by s.session_started_at
 """
 
