@@ -15,6 +15,10 @@ import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+import math
+
+import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 # ----------------------------------------------------------------------------- config
@@ -45,8 +49,19 @@ if not TOKEN:
     st.stop()
 
 TABLE = "main.default.epackmaverickv1_can_parsed_2026_04_23"
+GPS_TABLE = "main.default.epackmaverickv1_c2c_gps_2026_06_23"
 IST = ZoneInfo("Asia/Kolkata")
 REFRESH_EVERY = 8  # seconds
+
+# Per-minute GPS track for the device over the range (sliced per session in Python).
+GPS_SQL = """
+select date_trunc('minute', source_timestamp) as minute,
+       avg(latitude) as lat, avg(longitude) as lon, max(speed) as spd
+from {gtable}
+where device_id = {device} and source_date > '{since}'
+  and latitude between 5 and 40 and longitude between 60 and 100
+group by 1 order by 1
+"""
 
 SQL_TEMPLATE = """
 with src as (
@@ -93,8 +108,7 @@ def _post_json(url, headers, payload=None, method="GET"):
         return json.load(r)
 
 
-def run_query(device, since):
-    sql = SQL_TEMPLATE.format(table=TABLE, device=device, since=since)
+def _exec(sql):
     base = f"https://{HOST}/api/2.0/sql/statements"
     headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
     data = _post_json(base + "/", headers, {
@@ -119,7 +133,12 @@ def run_query(device, since):
 
 @st.cache_data(ttl=REFRESH_EVERY - 1, show_spinner=False)
 def cached_query(device, since):
-    return run_query(device, since)
+    return _exec(SQL_TEMPLATE.format(table=TABLE, device=device, since=since))
+
+
+@st.cache_data(ttl=REFRESH_EVERY - 1, show_spinner=False)
+def cached_gps(device, since):
+    return _exec(GPS_SQL.format(gtable=GPS_TABLE, device=device, since=since))
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -128,6 +147,51 @@ def num(v):
         return None if v in (None, "") else float(v)
     except (TypeError, ValueError):
         return None
+
+
+def parse_ts(s):
+    """Parse Databricks timestamp strings (ISO 'T...Z' or 'space' form) to UTC-aware."""
+    t = str(s).strip().replace(" ", "T").replace("Z", "+00:00")
+    dt = datetime.fromisoformat(t)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def gps_track(gps_rows, start_iso, end_iso):
+    """Per-minute lat/lon points that fall within [start, end] -> DataFrame."""
+    s, e = parse_ts(start_iso), parse_ts(end_iso)
+    pts = []
+    for g in gps_rows:
+        m = g.get("minute")
+        lat, lon = num(g.get("lat")), num(g.get("lon"))
+        if m is None or lat is None or lon is None:
+            continue
+        if s <= parse_ts(m) <= e:
+            pts.append((lat, lon))
+    return pd.DataFrame(pts, columns=["lat", "lon"])
+
+
+def render_track_map(df, live):
+    """Route map for one session: pixel-sized dots + path line, auto-zoomed (capped)."""
+    clat = float((df["lat"].min() + df["lat"].max()) / 2)
+    clon = float((df["lon"].min() + df["lon"].max()) / 2)
+    span = max(float(df["lat"].max() - df["lat"].min()),
+               float(df["lon"].max() - df["lon"].min()), 1e-4)
+    zoom = max(3.0, min(15.0, math.log2(360.0 / span) - 1.0))
+    color = [21, 163, 74] if live else [239, 114, 52]
+    path = [[float(r.lon), float(r.lat)] for r in df.itertuples()]
+    layers = [
+        pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
+                  get_color=color, width_min_pixels=3, cap_rounded=True, joint_rounded=True),
+        pdk.Layer("ScatterplotLayer", data=df, get_position="[lon, lat]",
+                  get_fill_color=color + [200], get_radius=4,
+                  radius_min_pixels=2, radius_max_pixels=5),
+    ]
+    deck = pdk.Deck(
+        layers=layers,
+        initial_view_state=pdk.ViewState(latitude=clat, longitude=clon, zoom=zoom),
+        map_provider="carto", map_style="light",
+    )
+    st.pydeck_chart(deck, use_container_width=True, height=240)
 
 
 def t_ist(iso):
@@ -181,8 +245,15 @@ st.markdown("""
   .fsbtn { margin-left:auto; text-decoration:none; font-size:12.5px; font-weight:600; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:9px; padding:6px 12px; white-space:nowrap; }
   .fsbtn:hover { border-color:var(--yellow); background:var(--yellow-sf); }
 
-  .sess { display:flex; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line-2); }
-  .sess:last-child { border-bottom:none; }
+  .sess { display:flex; align-items:center; padding:15px 20px; border:1px solid var(--line); border-radius:14px; background:#fff; box-shadow:0 1px 2px rgba(16,18,25,.04); }
+  .list-head { display:flex; align-items:center; gap:10px; margin:2px 2px 4px; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
+  .list-head .accent { width:26px; height:4px; border-radius:2px; background:var(--yellow); }
+  .list-head b { font-size:14.5px; }
+  .list-head .count { font-size:12px; color:var(--faint); }
+  .nomap { font-size:12px; color:var(--faint); padding:6px 4px 2px; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
+  /* tighten the gap so a map sits close under its session card */
+  div[data-testid="stVerticalBlock"] { gap: 0.45rem; }
+  div[data-testid="stElementContainer"]:has(.stMap) { margin-bottom: 8px; }
   .ident { display:flex; align-items:center; gap:13px; min-width:150px; }
   .stcol { width:5px; align-self:stretch; min-height:38px; border-radius:3px; background:var(--faint); }
   .sess.charging .stcol { background:#f59e0b; }
@@ -267,10 +338,8 @@ if FULLSCREEN:
     st.markdown("""
     <style>
       .ep-head, div[data-testid="stHorizontalBlock"] { display: none !important; }
-      .block-container { padding: 0 !important; max-width: 100% !important; }
-      .board { position: fixed; inset: 0; z-index: 99999; border: none; border-radius: 0;
-               height: 100vh; overflow-y: auto; box-shadow: none; }
-      .board-head { position: sticky; top: 0; background: #fff; z-index: 5; }
+      .block-container { position: fixed; inset: 0; max-width: 100% !important;
+                         padding: 1rem 1.5rem !important; overflow-y: auto; background: #fff; z-index: 99999; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -280,12 +349,15 @@ if FULLSCREEN:
 def board():
     try:
         rows = cached_query(int(device), since.strip())
+        gps = cached_gps(int(device), since.strip())
         st.session_state["rows"] = rows
+        st.session_state["gps"] = gps
         st.session_state["ts"] = datetime.now(timezone.utc)
     except Exception:
         pass  # keep showing last good data on a transient hiccup
 
     rows = st.session_state.get("rows", [])
+    gps = st.session_state.get("gps", [])
     ts = st.session_state.get("ts")
     dev = rows[0]["device_id"] if rows else device
     when = ""
@@ -299,27 +371,32 @@ def board():
         <div class="ep-bolt">⚡</div>
         <div>
           <div class="ep-title">e<span class="pk">Pack</span> Session</div>
-          <div class="ep-sub">Live battery sessions for device <b>{dev}</b> · newest first</div>
+          <div class="ep-sub">Live battery sessions for device <b>{dev}</b> · newest first · map under each ride</div>
         </div>
         <div class="ep-stat"><span class="d"></span>{when or 'connecting…'}</div>
       </div>
     """, unsafe_allow_html=True)
 
     if not rows:
-        st.markdown('<div class="board"><div class="sess">Querying Databricks… first query can take up to ~90s while the warehouse wakes.</div></div>', unsafe_allow_html=True)
+        st.info("Querying Databricks… the first query can take up to ~90s while the warehouse wakes.")
         return
 
-    ordered = list(reversed(rows))  # live / newest first
-    cards = "".join(session_html(r) for r in ordered)
     fs_now = st.query_params.get("fs") == "1"
     fs_link = ('<a class="fsbtn" href="?fs=0" target="_self">✕ Exit fullscreen</a>' if fs_now
                else '<a class="fsbtn" href="?fs=1" target="_self">⛶ Fullscreen</a>')
-    st.markdown(f"""
-      <div class="board">
-        <div class="board-head"><span class="accent"></span><h2>Sessions</h2><span class="count">{len(rows)} total</span>{fs_link}</div>
-        {cards}
-      </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f'<div class="list-head"><span class="accent"></span><b>Sessions</b>'
+                f'<span class="count">{len(rows)} total</span>{fs_link}</div>', unsafe_allow_html=True)
+
+    for r in reversed(rows):  # live / newest first
+        live = str(r["is_live"]).lower() == "true"
+        st.markdown(session_html(r), unsafe_allow_html=True)
+        # Map of the per-minute GPS track under each DISCHARGING (riding) session.
+        if str(r["battery_status"]).lower() == "discharging":
+            track = gps_track(gps, r["session_started_at"], r["session_ended_at"])
+            if len(track) > 0:
+                render_track_map(track, live)
+            else:
+                st.markdown('<div class="nomap">No GPS track for this session.</div>', unsafe_allow_html=True)
 
 
 board()
