@@ -258,7 +258,7 @@ def session_html(r):
 
 # ----------------------------------------------------------------------------- controls
 c1, c2, _ = st.columns([1, 1, 6])
-device = c1.text_input("Device ID", value="11")
+device = c1.text_input("Device ID", value="13")
 since = c2.text_input("Since", value="2026-06-21")
 
 # Fullscreen = the sessions board only, as a full-page overlay (toggled via ?fs=1).
