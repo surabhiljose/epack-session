@@ -183,7 +183,7 @@ st.markdown("""
 
   .sess { display:flex; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line-2); }
   .sess:last-child { border-bottom:none; }
-  .ident { display:flex; align-items:center; gap:13px; min-width:224px; }
+  .ident { display:flex; align-items:center; gap:13px; min-width:150px; }
   .stcol { width:5px; align-self:stretch; min-height:38px; border-radius:3px; background:var(--faint); }
   .sess.charging .stcol { background:#f59e0b; }
   .sess.discharging .stcol { background:#ef7234; }
@@ -199,8 +199,8 @@ st.markdown("""
   .epk { font-size:14px; font-weight:700; letter-spacing:-.2px; color:var(--ink); }
   .epk .dev { color:var(--faint); font-weight:500; font-size:12px; margin-left:7px; }
 
-  .metrics { display:flex; align-items:center; margin-left:auto; flex-wrap:wrap; }
-  .seg { padding:0 20px; border-left:1px solid var(--line-2); min-width:100px; }
+  .metrics { display:flex; align-items:center; flex:1; }
+  .seg { flex:1; padding:0 22px; border-left:1px solid var(--line-2); min-width:90px; }
   .seg:first-child { border-left:none; }
   .seg .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--faint); margin-bottom:5px; }
   .seg .val { font-size:15px; font-weight:700; letter-spacing:-.3px; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink); }
