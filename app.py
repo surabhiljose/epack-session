@@ -381,7 +381,7 @@ def render_past_trips(rows):
         kpk = num(r["kwh_per_km"])
         soc = (f"{socS:.0f}<span class='sa'>&rarr;</span>{socE:.0f}%"
                if (socS is not None and socE is not None) else "<span class='muted'>—</span>")
-        dist_c = f"{dist:.0f}<span class='u'> km</span>" if dist is not None else "<span class='muted'>—</span>"
+        dist_c = f"{round(dist, 1):g}<span class='u'> km</span>" if dist is not None else "<span class='muted'>—</span>"
         en_c = f"{energy:.1f}<span class='u'> kWh</span>" if energy is not None else "<span class='muted'>—</span>"
         eff_c = f"<span class='eff'>{kpk:.2f}</span>" if kpk is not None else "<span class='muted'>—</span>"
         out.append(
@@ -490,7 +490,13 @@ def board():
     fs_link = ('<a class="mv-fs" href="?fs=0" target="_self">✕ Exit</a>' if fs_now
                else '<a class="mv-fs" href="?fs=1" target="_self">⤢ Fullscreen</a>')
 
-    rides = [r for r in reversed(rows) if str(r["battery_status"]).lower() == "discharging"]
+    def _dist(r):
+        a, b = num(r["odo_read_start"]), num(r["odo_read_end"])
+        return (b - a) if (a is not None and b is not None) else 0.0
+
+    # only actual trips: discharging AND the vehicle actually moved (>= 0.1 km)
+    rides = [r for r in reversed(rows)
+             if str(r["battery_status"]).lower() == "discharging" and _dist(r) >= 0.1]
 
     st.markdown(f"""
       <div class="mv-head">
@@ -511,7 +517,7 @@ def board():
         st.info("Querying Databricks… the first query can take up to ~90s while the warehouse wakes.")
         return
     if not rides:
-        st.markdown('<div class="empty-card">No discharging trips for this device / date range yet.</div>',
+        st.markdown('<div class="empty-card">No trips (with distance) for this device / date range yet.</div>',
                     unsafe_allow_html=True)
         return
 
