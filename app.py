@@ -396,7 +396,10 @@ st.markdown("""
   .sec-count{font-size:11px;color:var(--t3);}
   .past-card{background:#fff;border:.5px solid var(--border);border-radius:16px;overflow:hidden;
              box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 20px;}
-  .past-table{width:100%;border-collapse:collapse;font-size:12px;font-family:'Bai Jamjuree',sans-serif;}
+  .past-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;font-family:'Bai Jamjuree',sans-serif;}
+  .past-table td,.past-table th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .col-time{width:24%;} .col-dur{width:13%;} .col-soc{width:21%;}
+  .col-dist{width:14%;} .col-energy{width:16%;} .col-eff{width:12%;}
   .past-table th{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;
                  padding:15px 8px 11px 0;text-align:left;border-bottom:.5px solid var(--border);}
   .past-table th:last-child,.past-table td:last-child{text-align:right;padding-right:0;}
@@ -492,6 +495,8 @@ def board():
     if past:
         st.markdown(
             '<div class="past-card"><table class="past-table">'
+            '<colgroup><col class="col-time"><col class="col-dur"><col class="col-soc">'
+            '<col class="col-dist"><col class="col-energy"><col class="col-eff"></colgroup>'
             '<thead><tr><th>Time</th><th>Duration</th><th>SOC</th>'
             '<th>Distance</th><th>Energy</th><th>kWh/km</th></tr></thead>'
             f'<tbody>{past_rows_html(past)}</tbody></table></div>',
