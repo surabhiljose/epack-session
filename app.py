@@ -495,9 +495,14 @@ def board():
         a, b = num(r["odo_read_start"]), num(r["odo_read_end"])
         return (b - a) if (a is not None and b is not None) else 0.0
 
-    # only actual trips: discharging AND the vehicle travelled more than 1 km
-    rides = [r for r in reversed(rows)
-             if str(r["battery_status"]).lower() == "discharging" and _dist(r) > 1]
+    def _is(r, k):
+        return str(r[k]).lower() == "true" if k == "is_live" else str(r["battery_status"]).lower() == k
+
+    # The currently-LIVE session, shown as the hero even if it hasn't moved yet.
+    live = next((r for r in rows if _is(r, "is_live")), None)
+    live_discharge = live if (live and _is(live, "discharging")) else None
+    # Older trips: discharging AND travelled more than 1 km.
+    trips = [r for r in reversed(rows) if _is(r, "discharging") and _dist(r) > 1]
 
     st.markdown(f"""
       <div class="mv-head">
@@ -517,16 +522,21 @@ def board():
     if not rows:
         st.info("Querying Databricks… the first query can take up to ~90s while the warehouse wakes.")
         return
-    if not rides:
-        st.markdown('<div class="empty-card">No trips (with distance) for this device / date range yet.</div>',
+
+    # Hero = the live discharging trip (any distance); else the latest >1km trip.
+    if live_discharge is not None:
+        hero, hero_live = live_discharge, True
+        past = [t for t in trips if t is not live_discharge]
+    elif trips:
+        hero, hero_live = trips[0], False
+        past = trips[1:]
+    else:
+        st.markdown('<div class="empty-card">No active trip, and no past trips over 1 km yet.</div>',
                     unsafe_allow_html=True)
         return
 
-    hero = rides[0]
-    hero_live = str(hero["is_live"]).lower() == "true"
     render_live_card(hero, gps, hero_live)
 
-    past = rides[1:]
     st.markdown(f'<div class="sec-row"><div class="sec-title">Past trips</div>'
                 f'<div class="sec-count">{len(past)} total</div></div>', unsafe_allow_html=True)
     if past:
