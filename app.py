@@ -315,13 +315,8 @@ def render_live_card(r, gps, live):
     meta = (f"{fmt_time(r['session_started_at'])} &rarr; "
             f"{'<b style=color:#2a7a5a>now</b>' if live else fmt_time(ended)}"
             f" &nbsp;&middot;&nbsp; {fmt_dur(r['session_started_at'], ended)} {'elapsed' if live else ''}")
-    # Map ONLY for a live discharging trip. A non-live (ended) trip shows no map.
-    if not live:
-        map_html, pts = "", []
-    elif pts:
-        map_html = '<div id="map"></div>'
-    else:
-        map_html = '<div class="nomap">No GPS track for this trip</div>'
+    # The hero (live card) always shows its route map.
+    map_html = '<div id="map"></div>' if pts else '<div class="nomap">No GPS track for this trip</div>'
     repl = {
         "__EYEBROW__": "Current trip" if live else "Latest trip",
         "__TID__": f"ePack #{r['epack_id']}" if r.get("epack_id") else f"Device {r['device_id']}",
@@ -339,7 +334,7 @@ def render_live_card(r, gps, live):
     html = LIVE_CARD
     for k, v in repl.items():
         html = html.replace(k, v)
-    st.components.v1.html(html, height=660 if live else 470)
+    st.components.v1.html(html, height=660)
 
 
 PAST_TABLE = """
