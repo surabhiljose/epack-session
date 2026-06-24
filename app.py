@@ -342,7 +342,36 @@ def render_live_card(r, gps, live):
     st.components.v1.html(html, height=660 if live else 470)
 
 
-def past_rows_html(rows):
+PAST_TABLE = """
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif;}
+  body{background:transparent;}
+  .pcard{background:#fff;border:.5px solid #E8E8E8;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.05);padding:2px 22px;}
+  table{width:100%;border-collapse:collapse;table-layout:fixed;}
+  th{font-size:10px;font-weight:700;color:#ADADAD;letter-spacing:.08em;text-transform:uppercase;
+     padding:16px 0 11px;border-bottom:.5px solid #E8E8E8;text-align:right;white-space:nowrap;}
+  td{font-size:12.5px;color:#212121;padding:13px 0;border-bottom:.5px solid #F1F1F1;text-align:right;
+     font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  th.l,td.l{text-align:left;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover td{background:rgba(255,176,0,.06);}
+  .tc{color:#666;} .dur{font-weight:600;} .sf{color:#666;}
+  .sa{color:#CFCFCF;margin:0 4px;} .u{color:#ADADAD;font-size:10px;} .eff{color:#CC8800;font-weight:700;}
+  .muted{color:#CFCFCF;}
+</style>
+<div class="pcard">
+  <table>
+    <colgroup><col style="width:25%"><col style="width:13%"><col style="width:20%">
+      <col style="width:15%"><col style="width:15%"><col style="width:12%"></colgroup>
+    <thead><tr><th class="l">Time</th><th>Duration</th><th>SOC</th><th>Distance</th><th>Energy</th><th>kWh/km</th></tr></thead>
+    <tbody>__ROWS__</tbody>
+  </table>
+</div>
+"""
+
+
+def render_past_trips(rows):
     out = []
     for r in rows:
         socS, socE = num(r["soc_start"]), num(r["soc_end"])
@@ -351,16 +380,17 @@ def past_rows_html(rows):
         dist = max(0.0, odoE - odoS) if (odoS is not None and odoE is not None) else None
         kpk = num(r["kwh_per_km"])
         soc = (f"{socS:.0f}<span class='sa'>&rarr;</span>{socE:.0f}%"
-               if (socS is not None and socE is not None) else "—")
+               if (socS is not None and socE is not None) else "<span class='muted'>—</span>")
+        dist_c = f"{dist:.0f}<span class='u'> km</span>" if dist is not None else "<span class='muted'>—</span>"
+        en_c = f"{energy:.1f}<span class='u'> kWh</span>" if energy is not None else "<span class='muted'>—</span>"
+        eff_c = f"<span class='eff'>{kpk:.2f}</span>" if kpk is not None else "<span class='muted'>—</span>"
         out.append(
-            f"<tr><td class='tc'>{fmt_date(r['session_started_at'])}</td>"
-            f"<td class='dc'>{fmt_dur(r['session_started_at'], r['session_ended_at'])}</td>"
-            f"<td class='sf'>{soc}</td>"
-            f"<td>{f'{dist:.0f}' if dist is not None else '—'}<span class='nu'> km</span></td>"
-            f"<td>{f'{energy:.1f}' if energy is not None else '—'}<span class='nu'> kWh</span></td>"
-            f"<td class='ev'>{f'{kpk:.2f}' if kpk is not None else '—'}</td></tr>"
+            f"<tr><td class='l tc'>{fmt_date(r['session_started_at'])}</td>"
+            f"<td class='dur'>{fmt_dur(r['session_started_at'], r['session_ended_at'])}</td>"
+            f"<td class='sf'>{soc}</td><td>{dist_c}</td><td>{en_c}</td><td>{eff_c}</td></tr>"
         )
-    return "".join(out)
+    html = PAST_TABLE.replace("__ROWS__", "".join(out))
+    st.components.v1.html(html, height=66 + len(rows) * 44)
 
 
 # ----------------------------------------------------------------------------- page styles
@@ -493,14 +523,7 @@ def board():
     st.markdown(f'<div class="sec-row"><div class="sec-title">Past trips</div>'
                 f'<div class="sec-count">{len(past)} total</div></div>', unsafe_allow_html=True)
     if past:
-        st.markdown(
-            '<div class="past-card"><table class="past-table">'
-            '<colgroup><col class="col-time"><col class="col-dur"><col class="col-soc">'
-            '<col class="col-dist"><col class="col-energy"><col class="col-eff"></colgroup>'
-            '<thead><tr><th>Time</th><th>Duration</th><th>SOC</th>'
-            '<th>Distance</th><th>Energy</th><th>kWh/km</th></tr></thead>'
-            f'<tbody>{past_rows_html(past)}</tbody></table></div>',
-            unsafe_allow_html=True)
+        render_past_trips(past)
     else:
         st.markdown('<div class="empty-card">No past trips yet.</div>', unsafe_allow_html=True)
 
