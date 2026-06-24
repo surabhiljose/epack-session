@@ -1,12 +1,14 @@
 """
-ePack Session — live battery-session board (single-file Streamlit app).
+Maverick Session — live discharging-trip board (single-file Streamlit app).
 
-Standalone project. Queries Databricks server-side (no CORS), auto-refreshes,
-highlights the live session in green. Credentials are hardcoded (throwaway token).
+Standalone project. Queries Databricks server-side (no CORS), auto-refreshes.
+Shows DISCHARGING (riding) sessions only: the latest/live trip as a hero card
+with a route map, and the rest as a past-trips table. Map appears on the live
+card only.
 
 Run:
     pip install streamlit
-    streamlit run app.py
+    DATABRICKS_TOKEN=dapi... streamlit run app.py
 """
 import os
 import json
@@ -15,17 +17,11 @@ import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-import math
-
-import pandas as pd
-import pydeck as pdk
 import streamlit as st
 
 # ----------------------------------------------------------------------------- config
-st.set_page_config(page_title="ePack Session", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Maverick Session", page_icon="⚡", layout="wide")
 
-# Host + warehouse id are not secret. The PAT is read from Streamlit Secrets (hosted)
-# or an env var (local/Docker) — never committed to the repo.
 HOST = "adb-7405606878126025.5.azuredatabricks.net"
 WAREHOUSE_ID = "f9d24f1f426c649f"
 
@@ -69,7 +65,7 @@ with src as (
     where device_id = {device} and source_date >= '{since}' and bms_state between 1 and 3
 ),
 -- sessionize by time-ordered STATE CHANGES so sessions are sequential & never overlap:
--- a new session starts whenever the state changes or there's a >4-min gap.
+-- a new session starts whenever the state changes or there's a >1-min gap.
 ordered as (
     select *,
         lag(bms_state) over (partition by device_id order by source_timestamp) as prev_state,
@@ -170,68 +166,16 @@ def num(v):
         return None
 
 
-def parse_ts(s):
-    """Parse Databricks timestamp strings (ISO 'T...Z' or 'space' form) to UTC-aware."""
-    t = str(s).strip().replace(" ", "T").replace("Z", "+00:00")
-    dt = datetime.fromisoformat(t)
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def gps_track(gps_rows, start_iso, end_iso):
-    """Per-minute lat/lon points that fall within [start, end] -> DataFrame."""
-    s, e = parse_ts(start_iso), parse_ts(end_iso)
-    pts = []
-    for g in gps_rows:
-        m = g.get("minute")
-        lat, lon = num(g.get("lat")), num(g.get("lon"))
-        if m is None or lat is None or lon is None:
-            continue
-        if s <= parse_ts(m) <= e:
-            pts.append((lat, lon))
-    return pd.DataFrame(pts, columns=["lat", "lon"])
-
-
-def render_track_map(df, live):
-    """Route map for one session via Leaflet + raster tiles.
-
-    We use Leaflet (raster PNG tiles) instead of pydeck/deck.gl because the WebGL
-    path layer crashes on near-stationary rides (zero-length segments) and the
-    vector basemap was unreliable. Leaflet just draws a polyline + dots and
-    auto-fits the bounds — no geometry math, nothing to crash.
-    """
-    pts = [[round(float(r.lat), 6), round(float(r.lon), 6)] for r in df.itertuples()]
-    color = "#15a34a" if live else "#ef7234"
-    html = """
-<div id="m" style="height:240px;border-radius:14px;overflow:hidden;border:1px solid #ededf1;"></div>
-<script>
-(function(){
-  var PTS = __PTS__, C = "__C__";
-  function init(){
-    var map = L.map('m', {zoomControl:true, attributionControl:true});
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-      {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
-    if (PTS.length > 1) L.polyline(PTS, {color:C, weight:4, opacity:0.9}).addTo(map);
-    PTS.forEach(function(p){ L.circleMarker(p, {radius:3, color:C, fillColor:C, fillOpacity:0.9, weight:1}).addTo(map); });
-    function fit(){ if (PTS.length === 1) { map.setView(PTS[0], 16); } else { map.fitBounds(PTS, {padding:[28,28], maxZoom:17}); } }
-    fit();
-    setTimeout(function(){ map.invalidateSize(); fit(); }, 200);
-  }
-  var css = document.createElement('link'); css.rel = 'stylesheet';
-  css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
-  var s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-  s.onload = init; document.head.appendChild(s);
-})();
-</script>
-""".replace("__PTS__", json.dumps(pts)).replace("__C__", color)
-    st.components.v1.html(html, height=252)
-
-
 def t_ist(iso):
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(IST)
 
 
 def fmt_time(iso):
     return t_ist(iso).strftime("%H:%M")
+
+
+def fmt_date(iso):
+    return t_ist(iso).strftime("%b %d · %H:%M")
 
 
 def fmt_dur(a, b):
@@ -246,134 +190,232 @@ def fmt_dur(a, b):
     return f"{m}m"
 
 
-# ----------------------------------------------------------------------------- styles
-st.markdown("""
+def gps_track(gps_rows, start_iso, end_iso):
+    """Per-minute lat/lon points within [start, end] -> list of [lat, lon]."""
+    a, b = t_ist(start_iso), t_ist(end_iso)
+    pts = []
+    for g in gps_rows:
+        m = g.get("minute")
+        lat, lon = num(g.get("lat")), num(g.get("lon"))
+        if m is None or lat is None or lon is None:
+            continue
+        mt = t_ist(m)
+        if a <= mt <= b:
+            pts.append([round(lat, 6), round(lon, 6)])
+    return pts
+
+
+# ----------------------------------------------------------------------------- live hero card (self-contained iframe w/ Leaflet)
+LIVE_CARD = """
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
-  #MainMenu, header[data-testid="stHeader"], footer { display: none; }
-  .block-container { padding: 1.4rem 2rem 2rem; max-width: 1280px; }
-  .stApp { background: #ffffff; }
-  /* Keep content crisp during the background refresh — no blur/fade on stale elements */
-  [data-stale="true"] { opacity: 1 !important; transition: none !important; filter: none !important; }
-  .stApp [data-testid="stStatusWidget"] { display: none !important; }
-  [data-testid="stSpinner"] { display: none !important; }
-  :root {
-    --ink:#16181d; --muted:#6b7280; --faint:#9aa1ad; --line:#ededf1; --line-2:#f4f5f7;
-    --yellow:#f5c518; --yellow-dk:#c79700; --yellow-sf:#fff7d6;
-    --green:#15a34a; --green-dk:#0f7a37; --green-sf:#ecfdf3;
-  }
-  .ep-head { display:flex; align-items:center; gap:15px; margin-bottom:20px; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
-  .ep-bolt { width:44px; height:44px; border-radius:13px; display:grid; place-items:center; background:var(--yellow); color:#181a1f; font-size:23px; box-shadow:0 6px 18px -8px rgba(245,197,24,.85); }
-  .ep-title { font-size:23px; font-weight:750; letter-spacing:-.4px; color:var(--ink); }
-  .ep-title .pk { color:var(--yellow-dk); }
-  .ep-sub { font-size:13px; color:var(--muted); margin-top:2px; }
-  .ep-stat { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); background:#fff; border:1px solid var(--line); padding:10px 14px; border-radius:999px; white-space:nowrap; }
-  .ep-stat .d { width:8px; height:8px; border-radius:50%; background:var(--green); }
-
-  .board { background:#fff; border:1px solid var(--line); border-radius:20px; box-shadow:0 1px 2px rgba(16,18,25,.04),0 10px 30px -18px rgba(16,18,25,.22); overflow:hidden; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
-  .board-head { display:flex; align-items:center; gap:11px; padding:16px 22px; border-bottom:1px solid var(--line-2); }
-  .board-head .accent { width:28px; height:4px; border-radius:2px; background:var(--yellow); }
-  .board-head h2 { margin:0; font-size:14.5px; font-weight:750; color:var(--ink); }
-  .board-head .count { font-size:12px; color:var(--faint); }
-  .fsbtn { margin-left:auto; text-decoration:none; font-size:12.5px; font-weight:600; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:9px; padding:6px 12px; white-space:nowrap; }
-  .fsbtn:hover { border-color:var(--yellow); background:var(--yellow-sf); }
-
-  .sess { display:flex; align-items:center; padding:15px 20px; border:1px solid var(--line); border-radius:14px; background:#fff; box-shadow:0 1px 2px rgba(16,18,25,.04); }
-  .list-head { display:flex; align-items:center; gap:10px; margin:2px 2px 4px; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
-  .list-head .accent { width:26px; height:4px; border-radius:2px; background:var(--yellow); }
-  .list-head b { font-size:14.5px; }
-  .list-head .count { font-size:12px; color:var(--faint); }
-  .nomap { font-size:12px; color:var(--faint); padding:6px 4px 2px; font-family:"Inter",-apple-system,"Segoe UI",sans-serif; }
-  /* tighten the gap so a map sits close under its session card */
-  div[data-testid="stVerticalBlock"] { gap: 0.45rem; }
-  div[data-testid="stElementContainer"]:has(.stMap) { margin-bottom: 8px; }
-  .ident { display:flex; align-items:center; gap:13px; min-width:150px; }
-  .stcol { width:5px; align-self:stretch; min-height:38px; border-radius:3px; background:var(--faint); }
-  .sess.charging .stcol { background:#f59e0b; }
-  .sess.discharging .stcol { background:#ef7234; }
-  .sess.standby .stcol { background:#b6bcc7; }
-  .id-main { display:flex; flex-direction:column; gap:6px; }
-  .id-top { display:flex; align-items:center; gap:8px; }
-  .pill { font-size:11.5px; font-weight:700; text-transform:capitalize; padding:3px 10px; border-radius:7px; background:#f1f2f4; color:#4b5563; width:fit-content; }
-  .pill.charging { background:#fef3da; color:#b45309; }
-  .pill.discharging { background:#fde7dc; color:#c2410c; }
-  .pill.standby { background:#eef0f3; color:#5b6472; }
-  .live-chip { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:800; letter-spacing:.8px; text-transform:uppercase; color:#fff; background:var(--green); border-radius:7px; padding:3px 9px; }
-  .live-chip .pulse { width:6px; height:6px; border-radius:50%; background:#fff; animation:ping 1.3s infinite; }
-  .epk { font-size:14px; font-weight:700; letter-spacing:-.2px; color:var(--ink); }
-  .epk .dev { color:var(--faint); font-weight:500; font-size:12px; margin-left:7px; }
-
-  .metrics { display:flex; align-items:center; flex:1; }
-  .seg { flex:1; padding:0 22px; border-left:1px solid var(--line-2); min-width:90px; }
-  .seg:first-child { border-left:none; }
-  .seg .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--faint); margin-bottom:5px; }
-  .seg .val { font-size:15px; font-weight:700; letter-spacing:-.3px; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink); }
-  .seg .val .u { font-size:11px; color:var(--muted); font-weight:500; margin-left:2px; }
-  .seg .val .arr { color:var(--faint); margin:0 5px; font-weight:500; }
-  .delta { font-size:11px; font-weight:600; margin-top:3px; }
-  .delta.up { color:var(--green); } .delta.down { color:#ef7234; }
-  .faint { color:var(--faint); }
-
-  .sess.live { background:linear-gradient(90deg,var(--green-sf),#fff 72%); box-shadow:inset 5px 0 0 var(--green); }
-  .sess.live .stcol { display:none; }
-  .sess.live .ident { padding-left:5px; }
-  .live-pill { display:inline-flex; align-items:center; gap:6px; width:fit-content; font-size:11px; font-weight:800; letter-spacing:.9px; text-transform:uppercase; color:#fff; background:var(--green); border-radius:7px; padding:4px 11px; }
-  .live-pill .pulse { width:7px; height:7px; border-radius:50%; background:#fff; animation:ping 1.3s infinite; }
-  @keyframes ping { 0%{box-shadow:0 0 0 0 rgba(255,255,255,.9);} 70%{box-shadow:0 0 0 6px rgba(255,255,255,0);} 100%{box-shadow:0 0 0 0 rgba(255,255,255,0);} }
-  .sess.live .seg .val { color:var(--green-dk); }
-  .sess.live .seg .val .u { color:#5b9c74; }
+  @import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif;}
+  :root{--surface:#fff;--surface-2:#F7F7F7;--border:#E8E8E8;--border-mid:#CFCFCF;
+        --t1:#212121;--t2:#666;--t3:#ADADAD;--amber:#CC8800;--amber-mid:#FFB000;--ground:#F2F2F2;}
+  body{background:transparent;}
+  .live-card{background:var(--surface);border:.5px solid var(--border);border-radius:16px;padding:22px;
+             position:relative;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.05);}
+  .live-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+             background:linear-gradient(90deg,var(--amber) 0%,var(--amber-mid) 50%,transparent 100%);opacity:.7;}
+  .top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;}
+  .eyebrow{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-bottom:4px;}
+  .tid{font-size:16px;font-weight:700;color:var(--t1);letter-spacing:-.02em;}
+  .tmeta{font-size:12px;color:var(--t2);margin-top:3px;}
+  .badge{background:var(--surface-2);color:var(--t2);border:.5px solid var(--border);border-radius:20px;
+         padding:4px 12px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;}
+  .soc-row{display:flex;align-items:flex-end;margin-bottom:16px;}
+  .soc-block{flex:1;}
+  .soc-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:4px;}
+  .soc-num{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.04em;color:var(--t1);font-variant-numeric:tabular-nums;}
+  .soc-num.cur{color:var(--amber);}
+  .soc-unit{font-size:20px;font-weight:300;color:var(--t3);margin-left:1px;}
+  .soc-div{color:var(--border-mid);font-size:22px;padding:0 16px 14px;}
+  .soc-tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--t2);
+           background:var(--surface-2);border:.5px solid var(--border);border-radius:20px;padding:3px 10px;margin-top:7px;}
+  .bar-wrap{margin-bottom:20px;}
+  .bar-track{height:8px;background:var(--ground);border:.5px solid var(--border);border-radius:4px;position:relative;}
+  .bar-fill{height:100%;background:linear-gradient(90deg,#E8960E 0%,#FFB000 60%,#FFD985 100%);border-radius:4px;
+            box-shadow:0 0 10px rgba(255,176,0,.4);position:relative;}
+  .bar-fill::after{content:'';position:absolute;right:-5px;top:50%;transform:translateY(-50%);width:10px;height:10px;
+            border-radius:50%;background:#FFB000;border:2px solid #fff;box-shadow:0 0 8px rgba(255,176,0,.6);}
+  .bar-lbls{display:flex;justify-content:space-between;margin-top:6px;}
+  .bar-lbls span{font-size:10px;color:var(--t3);}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;}
+  .mcard{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;padding:15px;position:relative;overflow:hidden;}
+  .mcard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--amber) 0%,transparent 70%);opacity:.5;}
+  .m-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:7px;}
+  .m-val{font-size:26px;font-weight:700;line-height:1;letter-spacing:-.025em;color:var(--t1);font-variant-numeric:tabular-nums;}
+  .m-unit{font-size:12px;font-weight:400;color:var(--t2);margin-left:2px;}
+  #map{height:200px;border-radius:12px;overflow:hidden;border:.5px solid var(--border);background:#09101F;}
+  .leaflet-container{background:#09101F;}
+  .nomap{height:200px;border-radius:12px;border:.5px dashed var(--border);background:var(--surface-2);
+         display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:12px;}
 </style>
-""", unsafe_allow_html=True)
+<div class="live-card">
+  <div class="top">
+    <div>
+      <div class="eyebrow">__EYEBROW__</div>
+      <div class="tid">__TID__</div>
+      <div class="tmeta">__META__</div>
+    </div>
+    <div class="badge">&#9660;&nbsp;Discharging</div>
+  </div>
+  <div class="soc-row">
+    <div class="soc-block"><div class="soc-lbl">SOC start</div><div class="soc-num">__SOC_S__<span class="soc-unit">%</span></div></div>
+    <div class="soc-div">&rarr;</div>
+    <div class="soc-block"><div class="soc-lbl">SOC now</div><div class="soc-num cur">__SOC_E__<span class="soc-unit">%</span></div>
+      <div class="soc-tag">&#9660; __DELTA__% consumed</div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="bar-track"><div class="bar-fill" style="width:__BARW__%"></div></div>
+    <div class="bar-lbls"><span>0%</span><span>State of Charge</span><span>100%</span></div>
+  </div>
+  <div class="grid">
+    <div class="mcard"><div class="m-lbl">Distance</div><div class="m-val">__DIST__<span class="m-unit">km</span></div></div>
+    <div class="mcard"><div class="m-lbl">Energy consumed</div><div class="m-val">__ENERGY__<span class="m-unit">kWh</span></div></div>
+    <div class="mcard"><div class="m-lbl">Efficiency</div><div class="m-val">__EFF__<span class="m-unit">kWh/km</span></div></div>
+  </div>
+  __MAP__
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  var PTS = __PTS__;
+  if (!PTS.length) return;
+  function init(){
+    var map = L.map('map', {zoomControl:true, attributionControl:true});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+    if (PTS.length > 1) L.polyline(PTS, {color:'#FFB000', weight:4, opacity:.95}).addTo(map);
+    L.circleMarker(PTS[0], {radius:4, color:'#7C5A12', fillColor:'#7C5A12', fillOpacity:1, weight:1}).addTo(map);
+    var last = PTS[PTS.length-1];
+    L.circleMarker(last, {radius:7, color:'#09101F', weight:2, fillColor:'#88CCAE', fillOpacity:1}).addTo(map);
+    function fit(){ if (PTS.length===1){ map.setView(PTS[0],15);} else { map.fitBounds(PTS,{padding:[26,26],maxZoom:16}); } }
+    fit(); setTimeout(function(){ map.invalidateSize(); fit(); }, 200);
+  }
+  if (window.L) init(); else {
+    var t=setInterval(function(){ if(window.L){clearInterval(t); init();} }, 60);
+  }
+})();
+</script>
+"""
 
 
-def session_html(r):
-    st_ = r["battery_status"]
-    live = str(r["is_live"]).lower() == "true"
+def render_live_card(r, gps, live):
     socS, socE = num(r["soc_start"]), num(r["soc_end"])
-    dsoc = (socE - socS) if (socS is not None and socE is not None) else None
+    delta = (socS - socE) if (socS is not None and socE is not None) else 0.0
     energy = num(r["energy_throughput_kwh"])
     odoS, odoE = num(r["odo_read_start"]), num(r["odo_read_end"])
     dist = max(0.0, odoE - odoS) if (odoS is not None and odoE is not None) else None
     kpk = num(r["kwh_per_km"])
-    # for a live session with no end timestamp yet, treat "now" as the end
     ended = r["session_ended_at"] or (datetime.now(timezone.utc).isoformat() if live else r["session_ended_at"])
-    fx = lambda v, dp: f"{v:.{dp}f}" if v is not None else "—"
-    kpk_str = f"{kpk:.2f}" if kpk is not None else '<span class="faint">—</span>'
-    # always show the status (charging/discharging/standby); live row also gets a green LIVE chip
-    status_pill = f'<span class="pill {st_}">{st_}</span>'
-    live_chip = '<span class="live-chip"><span class="pulse"></span>Live</span>' if live else ''
-    top = f'<div class="id-top">{status_pill}{live_chip}</div>'
-    delta = (f'<div class="delta {"up" if dsoc >= 0 else "down"}">{"▲" if dsoc >= 0 else "▼"} {abs(dsoc):.1f}%</div>'
-             if dsoc is not None else "")
-    return f"""
-      <div class="sess {st_}{' live' if live else ''}">
-        <div class="ident">
-          <div class="stcol"></div>
-          <div class="id-main">{top}</div>
-        </div>
-        <div class="metrics">
-          <div class="seg"><div class="lbl">Time</div><div class="val">{fmt_time(r['session_started_at'])}<span class="arr">→</span>{fmt_time(ended)}</div></div>
-          <div class="seg"><div class="lbl">Duration</div><div class="val">{fmt_dur(r['session_started_at'], ended)}</div></div>
-          <div class="seg"><div class="lbl">SoC start → end</div><div class="val">{fx(socS,1)}<span class="arr">→</span>{fx(socE,1)}<span class="u">%</span></div>{delta}</div>
-          <div class="seg"><div class="lbl">KMs travelled</div><div class="val">{fx(dist,1)}<span class="u">km</span></div></div>
-          <div class="seg"><div class="lbl">Energy</div><div class="val">{fx(energy,2)}<span class="u">kWh</span></div></div>
-          <div class="seg"><div class="lbl">kWh / km</div><div class="val">{kpk_str}</div></div>
-        </div>
-      </div>"""
+    pts = gps_track(gps, r["session_started_at"], ended) if gps else []
 
+    meta = (f"{fmt_time(r['session_started_at'])} &rarr; "
+            f"{'<b style=color:#2a7a5a>now</b>' if live else fmt_time(ended)}"
+            f" &nbsp;&middot;&nbsp; {fmt_dur(r['session_started_at'], ended)} {'elapsed' if live else ''}")
+    map_html = '<div id="map"></div>' if pts else '<div class="nomap">No GPS track for this trip</div>'
+    repl = {
+        "__EYEBROW__": "Current trip" if live else "Latest trip",
+        "__TID__": f"ePack #{r['epack_id']}" if r.get("epack_id") else f"Device {r['device_id']}",
+        "__META__": meta,
+        "__SOC_S__": f"{socS:.0f}" if socS is not None else "—",
+        "__SOC_E__": f"{socE:.1f}" if socE is not None else "—",
+        "__DELTA__": f"{abs(delta):.1f}",
+        "__BARW__": f"{socE:.1f}" if socE is not None else "0",
+        "__DIST__": f"{dist:.1f}" if dist is not None else "—",
+        "__ENERGY__": f"{energy:.2f}" if energy is not None else "—",
+        "__EFF__": f"{kpk:.2f}" if kpk is not None else "—",
+        "__MAP__": map_html,
+        "__PTS__": json.dumps(pts),
+    }
+    html = LIVE_CARD
+    for k, v in repl.items():
+        html = html.replace(k, v)
+    st.components.v1.html(html, height=660)
+
+
+def past_rows_html(rows):
+    out = []
+    for r in rows:
+        socS, socE = num(r["soc_start"]), num(r["soc_end"])
+        energy = num(r["energy_throughput_kwh"])
+        odoS, odoE = num(r["odo_read_start"]), num(r["odo_read_end"])
+        dist = max(0.0, odoE - odoS) if (odoS is not None and odoE is not None) else None
+        kpk = num(r["kwh_per_km"])
+        soc = (f"{socS:.0f}<span class='sa'>&rarr;</span>{socE:.0f}%"
+               if (socS is not None and socE is not None) else "—")
+        out.append(
+            f"<tr><td class='tc'>{fmt_date(r['session_started_at'])}</td>"
+            f"<td class='dc'>{fmt_dur(r['session_started_at'], r['session_ended_at'])}</td>"
+            f"<td class='sf'>{soc}</td>"
+            f"<td>{f'{dist:.0f}' if dist is not None else '—'}<span class='nu'> km</span></td>"
+            f"<td>{f'{energy:.1f}' if energy is not None else '—'}<span class='nu'> kWh</span></td>"
+            f"<td class='ev'>{f'{kpk:.2f}' if kpk is not None else '—'}</td></tr>"
+        )
+    return "".join(out)
+
+
+# ----------------------------------------------------------------------------- page styles
+st.markdown("""
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap');
+  #MainMenu, header[data-testid="stHeader"], footer { display:none; }
+  [data-testid="stStatusWidget"], [data-testid="stSpinner"] { display:none !important; }
+  [data-stale="true"] { opacity:1 !important; transition:none !important; filter:none !important; }
+  .stApp { background:#F2F2F2; }
+  .block-container { padding:1.6rem 2rem 3rem; max-width:880px; font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif; }
+  :root{--surface:#fff;--surface-2:#F7F7F7;--border:#E8E8E8;--border-mid:#CFCFCF;
+        --t1:#212121;--t2:#666;--t3:#ADADAD;--brand:#FFB000;--amber:#CC8800;--amber-dim:rgba(255,176,0,.07);--mint:#88CCAE;--mint-shade:#2a7a5a;}
+  .mv-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;
+           font-family:'Bai Jamjuree',sans-serif;}
+  .mv-left{display:flex;align-items:center;gap:10px;}
+  .mv-logo{width:34px;height:34px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;
+           color:#fff;font-size:17px;box-shadow:0 2px 8px rgba(255,176,0,.35);}
+  .mv-title{font-size:15px;font-weight:700;color:var(--t1);letter-spacing:-.02em;}
+  .mv-dev{font-size:12px;font-weight:600;color:var(--t1);background:#fff;border:.5px solid var(--border);border-radius:8px;padding:4px 10px;}
+  .mv-right{display:flex;align-items:center;gap:10px;}
+  .mv-upd{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums;}
+  .mv-upd.fresh{color:var(--mint-shade);}
+  .mv-live{display:flex;align-items:center;gap:6px;background:rgba(136,204,174,.18);border:.5px solid var(--mint);
+           border-radius:20px;padding:4px 11px;font-size:10px;font-weight:700;color:#2a7a5a;letter-spacing:.10em;text-transform:uppercase;}
+  .mv-dot{width:7px;height:7px;border-radius:50%;background:var(--mint);animation:lp 2.2s infinite;}
+  @keyframes lp{0%,100%{opacity:1}50%{opacity:.35}}
+  .mv-fs{text-decoration:none;font-size:12px;font-weight:600;color:var(--t2);background:#fff;border:.5px solid var(--border);
+         border-radius:8px;padding:5px 11px;white-space:nowrap;}
+  .mv-fs:hover{border-color:var(--amber);color:var(--amber);}
+  .sec-row{display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px;}
+  .sec-title{font-size:13px;font-weight:700;color:var(--t1);}
+  .sec-count{font-size:11px;color:var(--t3);}
+  .past-card{background:#fff;border:.5px solid var(--border);border-radius:16px;overflow:hidden;
+             box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 20px;}
+  .past-table{width:100%;border-collapse:collapse;font-size:12px;font-family:'Bai Jamjuree',sans-serif;}
+  .past-table th{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;
+                 padding:15px 8px 11px 0;text-align:left;border-bottom:.5px solid var(--border);}
+  .past-table th:last-child,.past-table td:last-child{text-align:right;padding-right:0;}
+  .past-table td{padding:12px 8px;color:var(--t1);border-bottom:.5px solid var(--border);padding-left:0;vertical-align:middle;}
+  .past-table tr:last-child td{border-bottom:none;}
+  .past-table tbody tr:hover td{background:var(--amber-dim);}
+  .tc{color:var(--t2);} .dc{font-weight:600;} .sf{color:var(--t2);} .sa{color:var(--border-mid);margin:0 4px;}
+  .nu{color:var(--t3);font-size:10px;} .ev{color:var(--amber);font-weight:700;}
+  .empty-card{background:#fff;border:.5px solid var(--border);border-radius:16px;padding:48px;text-align:center;color:var(--t2);font-size:13px;}
+  div[data-testid="stTextInput"] input{font-family:'Bai Jamjuree',sans-serif;}
+</style>
+""", unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------------- controls
 c1, c2, _ = st.columns([1, 1, 6])
-device = c1.text_input("Device ID", value="13")
+device = c1.text_input("Device", value="13")
 since = c2.text_input("Since", value="2026-06-23")
 
-# Fullscreen = the sessions board only, as a full-page overlay (toggled via ?fs=1).
 FULLSCREEN = st.query_params.get("fs") == "1"
 if FULLSCREEN:
     st.markdown("""
     <style>
-      .ep-head, div[data-testid="stHorizontalBlock"] { display: none !important; }
-      .block-container { position: fixed; inset: 0; max-width: 100% !important;
-                         padding: 1rem 1.5rem !important; overflow-y: auto; background: #fff; z-index: 99999; }
+      div[data-testid="stHorizontalBlock"] { display:none !important; }
+      .block-container { position:fixed; inset:0; max-width:100% !important; padding:1.2rem 2rem !important;
+                         overflow-y:auto; background:#F2F2F2; z-index:99999; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -388,50 +430,68 @@ def board():
         st.session_state["gps"] = gps
         st.session_state["ts"] = datetime.now(timezone.utc)
     except Exception:
-        pass  # keep showing last good data on a transient hiccup
+        pass  # keep last good data on a transient hiccup
 
     rows = st.session_state.get("rows", [])
     gps = st.session_state.get("gps", [])
     ts = st.session_state.get("ts")
     dev = rows[0]["device_id"] if rows else device
-    when = ""
-    if ts:
-        secs = int((datetime.now(timezone.utc) - ts).total_seconds())
-        ago = f"{secs}s ago" if secs < 60 else f"{secs // 60}m ago"
-        when = f"live · updated {ago}"
+
+    secs = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else None
+    if secs is None:
+        upd = "connecting…"
+    elif secs <= 3:
+        upd = "Updated just now"
+    elif secs < 60:
+        upd = f"Updated {secs}s ago"
+    else:
+        upd = f"Updated {secs // 60}m ago"
+    fresh = " fresh" if (secs is not None and secs <= 3) else ""
+    fs_now = st.query_params.get("fs") == "1"
+    fs_link = ('<a class="mv-fs" href="?fs=0" target="_self">✕ Exit</a>' if fs_now
+               else '<a class="mv-fs" href="?fs=1" target="_self">⤢ Fullscreen</a>')
+
+    rides = [r for r in reversed(rows) if str(r["battery_status"]).lower() == "discharging"]
 
     st.markdown(f"""
-      <div class="ep-head">
-        <div class="ep-bolt">⚡</div>
-        <div>
-          <div class="ep-title">e<span class="pk">Pack</span> Session</div>
-          <div class="ep-sub">Live battery sessions for device <b>{dev}</b> · newest first · map under each ride</div>
+      <div class="mv-head">
+        <div class="mv-left">
+          <div class="mv-logo">⚡</div>
+          <div class="mv-title">Maverick Session</div>
+          <div class="mv-dev">Device {dev}</div>
         </div>
-        <div class="ep-stat"><span class="d"></span>{when or 'connecting…'}</div>
+        <div class="mv-right">
+          <span class="mv-upd{fresh}">{upd}</span>
+          <div class="mv-live"><div class="mv-dot"></div>Live</div>
+          {fs_link}
+        </div>
       </div>
     """, unsafe_allow_html=True)
 
     if not rows:
         st.info("Querying Databricks… the first query can take up to ~90s while the warehouse wakes.")
         return
+    if not rides:
+        st.markdown('<div class="empty-card">No discharging trips for this device / date range yet.</div>',
+                    unsafe_allow_html=True)
+        return
 
-    fs_now = st.query_params.get("fs") == "1"
-    fs_link = ('<a class="fsbtn" href="?fs=0" target="_self">✕ Exit fullscreen</a>' if fs_now
-               else '<a class="fsbtn" href="?fs=1" target="_self">⛶ Fullscreen</a>')
-    st.markdown(f'<div class="list-head"><span class="accent"></span><b>Sessions</b>'
-                f'<span class="count">{len(rows)} total</span>{fs_link}</div>', unsafe_allow_html=True)
+    hero = rides[0]
+    hero_live = str(hero["is_live"]).lower() == "true"
+    render_live_card(hero, gps, hero_live)
 
-    for r in reversed(rows):  # live / newest first
-        live = str(r["is_live"]).lower() == "true"
-        st.markdown(session_html(r), unsafe_allow_html=True)
-        # Map of the per-minute GPS track under each DISCHARGING (riding) session.
-        if str(r["battery_status"]).lower() == "discharging":
-            track = gps_track(gps, r["session_started_at"], r["session_ended_at"])
-            if len(track) > 0:
-                render_track_map(track, live)
-            else:
-                st.markdown('<div class="nomap">No GPS track for this session.</div>', unsafe_allow_html=True)
+    past = rides[1:]
+    st.markdown(f'<div class="sec-row"><div class="sec-title">Past trips</div>'
+                f'<div class="sec-count">{len(past)} total</div></div>', unsafe_allow_html=True)
+    if past:
+        st.markdown(
+            '<div class="past-card"><table class="past-table">'
+            '<thead><tr><th>Time</th><th>Duration</th><th>SOC</th>'
+            '<th>Distance</th><th>Energy</th><th>kWh/km</th></tr></thead>'
+            f'<tbody>{past_rows_html(past)}</tbody></table></div>',
+            unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="empty-card">No past trips yet.</div>', unsafe_allow_html=True)
 
 
 board()
-st.caption("Tip: press F11 (Windows) or ⌃⌘F (Mac) for fullscreen.")
