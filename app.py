@@ -247,8 +247,8 @@ LIVE_CARD = """
   .m-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:7px;}
   .m-val{font-size:26px;font-weight:700;line-height:1;letter-spacing:-.025em;color:var(--t1);font-variant-numeric:tabular-nums;}
   .m-unit{font-size:12px;font-weight:400;color:var(--t2);margin-left:2px;}
-  #map{height:200px;border-radius:12px;overflow:hidden;border:.5px solid var(--border);background:#09101F;}
-  .leaflet-container{background:#09101F;}
+  #map{height:200px;border-radius:12px;overflow:hidden;border:.5px solid var(--border);background:#eef0f3;}
+  .leaflet-container{background:#eef0f3;}
   .nomap{height:200px;border-radius:12px;border:.5px dashed var(--border);background:var(--surface-2);
          display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:12px;}
 </style>
@@ -282,11 +282,11 @@ LIVE_CARD = """
 <script>
 (function(){
   var PTS = __PTS__;
-  if (!PTS.length) return;
+  if (!PTS.length || !document.getElementById('map')) return;
   function init(){
     var map = L.map('map', {zoomControl:true, attributionControl:true});
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-      {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
     if (PTS.length > 1) L.polyline(PTS, {color:'#FFB000', weight:4, opacity:.95}).addTo(map);
     L.circleMarker(PTS[0], {radius:4, color:'#7C5A12', fillColor:'#7C5A12', fillOpacity:1, weight:1}).addTo(map);
     var last = PTS[PTS.length-1];
@@ -315,7 +315,13 @@ def render_live_card(r, gps, live):
     meta = (f"{fmt_time(r['session_started_at'])} &rarr; "
             f"{'<b style=color:#2a7a5a>now</b>' if live else fmt_time(ended)}"
             f" &nbsp;&middot;&nbsp; {fmt_dur(r['session_started_at'], ended)} {'elapsed' if live else ''}")
-    map_html = '<div id="map"></div>' if pts else '<div class="nomap">No GPS track for this trip</div>'
+    # Map ONLY for a live discharging trip. A non-live (ended) trip shows no map.
+    if not live:
+        map_html, pts = "", []
+    elif pts:
+        map_html = '<div id="map"></div>'
+    else:
+        map_html = '<div class="nomap">No GPS track for this trip</div>'
     repl = {
         "__EYEBROW__": "Current trip" if live else "Latest trip",
         "__TID__": f"ePack #{r['epack_id']}" if r.get("epack_id") else f"Device {r['device_id']}",
@@ -333,7 +339,7 @@ def render_live_card(r, gps, live):
     html = LIVE_CARD
     for k, v in repl.items():
         html = html.replace(k, v)
-    st.components.v1.html(html, height=660)
+    st.components.v1.html(html, height=660 if live else 470)
 
 
 def past_rows_html(rows):
