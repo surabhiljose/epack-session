@@ -212,7 +212,7 @@ LIVE_CARD = """
   @import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif;}
   :root{--surface:#fff;--surface-2:#F7F7F7;--border:#E8E8E8;--border-mid:#CFCFCF;
-        --t1:#212121;--t2:#666;--t3:#ADADAD;--amber:#CC8800;--amber-mid:#FFB000;--ground:#F2F2F2;}
+        --t1:#212121;--t2:#666;--t3:#ADADAD;--amber:#E8960E;--amber-mid:#FFB000;--ground:#F2F2F2;}
   body{background:transparent;}
   .live-card{background:var(--surface);border:.5px solid var(--border);border-radius:16px;padding:22px;
              position:relative;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.05);}
@@ -224,15 +224,16 @@ LIVE_CARD = """
   .tmeta{font-size:12px;color:var(--t2);margin-top:3px;}
   .badge{background:var(--surface-2);color:var(--t2);border:.5px solid var(--border);border-radius:20px;
          padding:4px 12px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;}
-  .soc-row{display:flex;align-items:flex-end;margin-bottom:16px;}
+  .soc-row{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:12px;}
   .soc-block{flex:1;}
-  .soc-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:4px;}
+  .soc-block.right{text-align:right;}
+  .soc-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:6px;}
   .soc-num{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.04em;color:var(--t1);font-variant-numeric:tabular-nums;}
   .soc-num.cur{color:var(--amber);}
   .soc-unit{font-size:20px;font-weight:300;color:var(--t3);margin-left:1px;}
-  .soc-div{color:var(--border-mid);font-size:22px;padding:0 16px 14px;}
-  .soc-tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--t2);
-           background:var(--surface-2);border:.5px solid var(--border);border-radius:20px;padding:3px 10px;margin-top:7px;}
+  .soc-arrow{font-size:26px;color:var(--border-mid);padding-bottom:10px;flex-shrink:0;}
+  .soc-consumed{display:block;width:fit-content;margin:0 auto 20px;font-size:11px;font-weight:600;color:var(--t2);
+           background:var(--surface-2);border:.5px solid var(--border);border-radius:20px;padding:4px 12px;}
   .bar-wrap{margin-bottom:20px;}
   .bar-track{height:8px;background:var(--ground);border:.5px solid var(--border);border-radius:4px;position:relative;}
   .bar-fill{height:100%;background:linear-gradient(90deg,#E8960E 0%,#FFB000 60%,#FFD985 100%);border-radius:4px;
@@ -245,7 +246,7 @@ LIVE_CARD = """
   .mcard{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;padding:15px;position:relative;overflow:hidden;}
   .mcard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--amber) 0%,transparent 70%);opacity:.5;}
   .m-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:7px;}
-  .m-val{font-size:26px;font-weight:700;line-height:1;letter-spacing:-.025em;color:var(--t1);font-variant-numeric:tabular-nums;}
+  .m-val{font-size:26px;font-weight:700;line-height:1;letter-spacing:-.025em;color:var(--amber);font-variant-numeric:tabular-nums;}
   .m-unit{font-size:12px;font-weight:400;color:var(--t2);margin-left:2px;}
   #map{height:200px;border-radius:12px;overflow:hidden;border:.5px solid var(--border);background:#eef0f3;}
   .leaflet-container{background:#eef0f3;}
@@ -262,11 +263,11 @@ LIVE_CARD = """
     <div class="badge">&#9660;&nbsp;Discharging</div>
   </div>
   <div class="soc-row">
-    <div class="soc-block"><div class="soc-lbl">SOC start</div><div class="soc-num">__SOC_S__<span class="soc-unit">%</span></div></div>
-    <div class="soc-div">&rarr;</div>
-    <div class="soc-block"><div class="soc-lbl">SOC now</div><div class="soc-num cur">__SOC_E__<span class="soc-unit">%</span></div>
-      <div class="soc-tag">&#9660; __DELTA__% consumed</div></div>
+    <div class="soc-block left"><div class="soc-lbl">SOC start</div><div class="soc-num">__SOC_S__<span class="soc-unit">%</span></div></div>
+    <div class="soc-arrow">&rarr;</div>
+    <div class="soc-block right"><div class="soc-lbl">SOC now</div><div class="soc-num cur">__SOC_E__<span class="soc-unit">%</span></div></div>
   </div>
+  <div class="soc-consumed">&#9660; __DELTA__% consumed</div>
   <div class="bar-wrap">
     <div class="bar-track"><div class="bar-fill" style="width:__BARW__%"></div></div>
     <div class="bar-lbls"><span>0%</span><span>State of Charge</span><span>100%</span></div>
@@ -287,7 +288,7 @@ LIVE_CARD = """
     var map = L.map('map', {zoomControl:true, attributionControl:true});
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
       {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
-    if (PTS.length > 1) L.polyline(PTS, {color:'#FFB000', weight:4, opacity:.95}).addTo(map);
+    if (PTS.length > 1) L.polyline(PTS, {color:'#E8960E', weight:4, opacity:.95}).addTo(map);
     L.circleMarker(PTS[0], {radius:4, color:'#7C5A12', fillColor:'#7C5A12', fillOpacity:1, weight:1}).addTo(map);
     var last = PTS[PTS.length-1];
     L.circleMarker(last, {radius:7, color:'#09101F', weight:2, fillColor:'#88CCAE', fillOpacity:1}).addTo(map);
