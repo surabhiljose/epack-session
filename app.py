@@ -224,14 +224,13 @@ LIVE_CARD = """
   .tmeta{font-size:12px;color:var(--t2);margin-top:3px;}
   .badge{background:var(--surface-2);color:var(--t2);border:.5px solid var(--border);border-radius:20px;
          padding:4px 12px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;}
-  .soc-row{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:12px;}
-  .soc-block{flex:1;}
-  .soc-block.right{text-align:right;}
+  .soc-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:end;margin-bottom:12px;}
+  .soc-block{text-align:center;}
   .soc-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:6px;}
   .soc-num{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.04em;color:var(--t1);font-variant-numeric:tabular-nums;}
   .soc-num.cur{color:var(--amber);}
   .soc-unit{font-size:20px;font-weight:300;color:var(--t3);margin-left:1px;}
-  .soc-arrow{font-size:26px;color:var(--border-mid);padding-bottom:10px;flex-shrink:0;}
+  .soc-arrow{font-size:26px;color:var(--border-mid);padding-bottom:10px;justify-self:center;}
   .soc-consumed{display:block;width:fit-content;margin:0 auto 20px;font-size:11px;font-weight:600;color:var(--t2);
            background:var(--surface-2);border:.5px solid var(--border);border-radius:20px;padding:4px 12px;}
   .bar-wrap{margin-bottom:20px;}
