@@ -176,7 +176,8 @@ def render_track_map(df, live):
     clon = float((df["lon"].min() + df["lon"].max()) / 2)
     span = max(float(df["lat"].max() - df["lat"].min()),
                float(df["lon"].max() - df["lon"].min()), 1e-4)
-    zoom = max(3.0, min(15.0, math.log2(360.0 / span) - 1.0))
+    # fit the track to the map with a little padding; tighter spans zoom in more (street level)
+    zoom = max(3.0, min(18.0, math.log2(360.0 / span) - 0.5))
     color = [21, 163, 74] if live else [239, 114, 52]
     path = [[float(r.lon), float(r.lat)] for r in df.itertuples()]
     layers = [
