@@ -171,37 +171,38 @@ def gps_track(gps_rows, start_iso, end_iso):
 
 
 def render_track_map(df, live):
-    """Route map for one session: pixel-sized dots + path line, auto-zoomed (capped)."""
-    clat = float((df["lat"].min() + df["lat"].max()) / 2)
-    clon = float((df["lon"].min() + df["lon"].max()) / 2)
-    # floor the span at ~100m so a near-stationary ride doesn't over-zoom onto one rooftop
-    span = max(float(df["lat"].max() - df["lat"].min()),
-               float(df["lon"].max() - df["lon"].min()), 1e-3)
-    # fit the track to the map with a little padding; cap so tiles always exist
-    zoom = max(3.0, min(17.0, math.log2(360.0 / span) - 0.5))
-    color = [21, 163, 74] if live else [239, 114, 52]
-    # Dedupe consecutive identical coords. A PathLayer with zero-length segments
-    # (a near-stationary ride pings the same point) renders as broken/degenerate
-    # geometry and kills the whole map — this is why some rides showed no tiles.
-    path = []
-    for r in df.itertuples():
-        p = [round(float(r.lon), 6), round(float(r.lat), 6)]
-        if not path or path[-1] != p:
-            path.append(p)
-    layers = [
-        pdk.Layer("ScatterplotLayer", data=df, get_position="[lon, lat]",
-                  get_fill_color=color + [200], get_radius=4,
-                  radius_min_pixels=2, radius_max_pixels=5),
-    ]
-    if len(path) >= 2:  # only draw a line when there are 2+ distinct points
-        layers.insert(0, pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
-                      get_color=color, width_min_pixels=3, cap_rounded=True, joint_rounded=True))
-    deck = pdk.Deck(
-        layers=layers,
-        initial_view_state=pdk.ViewState(latitude=clat, longitude=clon, zoom=zoom),
-        map_provider="carto", map_style="light",
-    )
-    st.pydeck_chart(deck, use_container_width=True, height=240)
+    """Route map for one session via Leaflet + raster tiles.
+
+    We use Leaflet (raster PNG tiles) instead of pydeck/deck.gl because the WebGL
+    path layer crashes on near-stationary rides (zero-length segments) and the
+    vector basemap was unreliable. Leaflet just draws a polyline + dots and
+    auto-fits the bounds — no geometry math, nothing to crash.
+    """
+    pts = [[round(float(r.lat), 6), round(float(r.lon), 6)] for r in df.itertuples()]
+    color = "#15a34a" if live else "#ef7234"
+    html = """
+<div id="m" style="height:240px;border-radius:14px;overflow:hidden;border:1px solid #ededf1;"></div>
+<script>
+(function(){
+  var PTS = __PTS__, C = "__C__";
+  function init(){
+    var map = L.map('m', {zoomControl:true, attributionControl:true});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+    if (PTS.length > 1) L.polyline(PTS, {color:C, weight:4, opacity:0.9}).addTo(map);
+    PTS.forEach(function(p){ L.circleMarker(p, {radius:3, color:C, fillColor:C, fillOpacity:0.9, weight:1}).addTo(map); });
+    function fit(){ if (PTS.length === 1) { map.setView(PTS[0], 16); } else { map.fitBounds(PTS, {padding:[28,28], maxZoom:17}); } }
+    fit();
+    setTimeout(function(){ map.invalidateSize(); fit(); }, 200);
+  }
+  var css = document.createElement('link'); css.rel = 'stylesheet';
+  css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
+  var s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  s.onload = init; document.head.appendChild(s);
+})();
+</script>
+""".replace("__PTS__", json.dumps(pts)).replace("__C__", color)
+    st.components.v1.html(html, height=252)
 
 
 def t_ist(iso):
