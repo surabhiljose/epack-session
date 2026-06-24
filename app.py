@@ -68,6 +68,27 @@ with src as (
     select * from {table}
     where device_id = {device} and source_date > '{since}' and bms_state between 1 and 3
 ),
+-- sessionize by time-ordered STATE CHANGES so sessions are sequential & never overlap:
+-- a new session starts whenever the state changes or there's a >4-min gap.
+ordered as (
+    select *,
+        lag(bms_state) over (partition by device_id order by source_timestamp) as prev_state,
+        lag(source_timestamp) over (partition by device_id order by source_timestamp) as prev_ts
+    from src
+),
+marked as (
+    select *,
+        case when prev_state is null or bms_state != prev_state
+                  or unix_timestamp(source_timestamp) - unix_timestamp(prev_ts) > 60
+             then 1 else 0 end as is_new
+    from ordered
+),
+grp as (
+    select *,
+        sum(is_new) over (partition by device_id order by source_timestamp
+                          rows between unbounded preceding and current row) as sid
+    from marked
+),
 sessions as (
     select
         case when bms_state = 1 then 'charging' when bms_state = 2 then 'discharging' when bms_state = 3 then 'standby' end as battery_status,
@@ -88,15 +109,15 @@ sessions as (
                    - min_by(b2v_totdischgenergy, source_timestamp) filter (where b2v_totdischgenergy is not null)) / 1000)
                  / (max_by(odo_read, source_timestamp) filter (where odo_read != 0) - min_by(odo_read, source_timestamp) filter (where odo_read != 0)) end as kwh_per_km,
         unix_timestamp(max(source_timestamp)) - unix_timestamp(min(source_timestamp)) as session_duration_seconds
-    from src
-    group by bms_state, device_id, iot_project, session_window(source_timestamp, '4 minutes')
+    from grp
+    group by sid, bms_state, device_id
 )
 select (s.session_ended_at = m.max_end) as is_live, s.battery_status, s.device_id, s.epack_id,
        s.soc_start, s.soc_end, s.session_started_at, s.session_ended_at,
        s.odo_read_start, s.odo_read_end, s.energy_throughput_kwh, s.kwh_per_km
 from sessions s cross join (select max(session_ended_at) as max_end from sessions) m
-where s.session_duration_seconds >= 240 or s.session_ended_at = m.max_end
-order by s.session_started_at
+where s.session_duration_seconds >= 60 or s.session_ended_at = m.max_end
+order by s.session_ended_at
 """
 
 
@@ -313,6 +334,8 @@ def session_html(r):
     odoS, odoE = num(r["odo_read_start"]), num(r["odo_read_end"])
     dist = max(0.0, odoE - odoS) if (odoS is not None and odoE is not None) else None
     kpk = num(r["kwh_per_km"])
+    # for a live session with no end timestamp yet, treat "now" as the end
+    ended = r["session_ended_at"] or (datetime.now(timezone.utc).isoformat() if live else r["session_ended_at"])
     fx = lambda v, dp: f"{v:.{dp}f}" if v is not None else "—"
     kpk_str = f"{kpk:.2f}" if kpk is not None else '<span class="faint">—</span>'
     # always show the status (charging/discharging/standby); live row also gets a green LIVE chip
@@ -328,8 +351,8 @@ def session_html(r):
           <div class="id-main">{top}</div>
         </div>
         <div class="metrics">
-          <div class="seg"><div class="lbl">Time</div><div class="val">{fmt_time(r['session_started_at'])}<span class="arr">→</span>{fmt_time(r['session_ended_at'])}</div></div>
-          <div class="seg"><div class="lbl">Duration</div><div class="val">{fmt_dur(r['session_started_at'], r['session_ended_at'])}</div></div>
+          <div class="seg"><div class="lbl">Time</div><div class="val">{fmt_time(r['session_started_at'])}<span class="arr">→</span>{fmt_time(ended)}</div></div>
+          <div class="seg"><div class="lbl">Duration</div><div class="val">{fmt_dur(r['session_started_at'], ended)}</div></div>
           <div class="seg"><div class="lbl">SoC start → end</div><div class="val">{fx(socS,1)}<span class="arr">→</span>{fx(socE,1)}<span class="u">%</span></div>{delta}</div>
           <div class="seg"><div class="lbl">KMs travelled</div><div class="val">{fx(dist,1)}<span class="u">km</span></div></div>
           <div class="seg"><div class="lbl">Energy</div><div class="val">{fx(energy,2)}<span class="u">kWh</span></div></div>
