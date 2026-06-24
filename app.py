@@ -174,19 +174,28 @@ def render_track_map(df, live):
     """Route map for one session: pixel-sized dots + path line, auto-zoomed (capped)."""
     clat = float((df["lat"].min() + df["lat"].max()) / 2)
     clon = float((df["lon"].min() + df["lon"].max()) / 2)
+    # floor the span at ~100m so a near-stationary ride doesn't over-zoom onto one rooftop
     span = max(float(df["lat"].max() - df["lat"].min()),
-               float(df["lon"].max() - df["lon"].min()), 1e-4)
-    # fit the track to the map with a little padding; tighter spans zoom in more (street level)
-    zoom = max(3.0, min(18.0, math.log2(360.0 / span) - 0.5))
+               float(df["lon"].max() - df["lon"].min()), 1e-3)
+    # fit the track to the map with a little padding; cap so tiles always exist
+    zoom = max(3.0, min(17.0, math.log2(360.0 / span) - 0.5))
     color = [21, 163, 74] if live else [239, 114, 52]
-    path = [[float(r.lon), float(r.lat)] for r in df.itertuples()]
+    # Dedupe consecutive identical coords. A PathLayer with zero-length segments
+    # (a near-stationary ride pings the same point) renders as broken/degenerate
+    # geometry and kills the whole map — this is why some rides showed no tiles.
+    path = []
+    for r in df.itertuples():
+        p = [round(float(r.lon), 6), round(float(r.lat), 6)]
+        if not path or path[-1] != p:
+            path.append(p)
     layers = [
-        pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
-                  get_color=color, width_min_pixels=3, cap_rounded=True, joint_rounded=True),
         pdk.Layer("ScatterplotLayer", data=df, get_position="[lon, lat]",
                   get_fill_color=color + [200], get_radius=4,
                   radius_min_pixels=2, radius_max_pixels=5),
     ]
+    if len(path) >= 2:  # only draw a line when there are 2+ distinct points
+        layers.insert(0, pdk.Layer("PathLayer", data=[{"path": path}], get_path="path",
+                      get_color=color, width_min_pixels=3, cap_rounded=True, joint_rounded=True))
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=pdk.ViewState(latitude=clat, longitude=clon, zoom=zoom),
