@@ -285,8 +285,8 @@ LIVE_CARD = """
   if (!PTS.length || !document.getElementById('map')) return;
   function init(){
     var map = L.map('map', {zoomControl:true, attributionControl:true});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      {maxZoom:20, attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
     if (PTS.length > 1) L.polyline(PTS, {color:'#FFB000', weight:4, opacity:.95}).addTo(map);
     L.circleMarker(PTS[0], {radius:4, color:'#7C5A12', fillColor:'#7C5A12', fillOpacity:1, weight:1}).addTo(map);
     var last = PTS[PTS.length-1];
@@ -494,9 +494,9 @@ def board():
         a, b = num(r["odo_read_start"]), num(r["odo_read_end"])
         return (b - a) if (a is not None and b is not None) else 0.0
 
-    # only actual trips: discharging AND the vehicle actually moved (>= 0.1 km)
+    # only actual trips: discharging AND the vehicle travelled more than 1 km
     rides = [r for r in reversed(rows)
-             if str(r["battery_status"]).lower() == "discharging" and _dist(r) >= 0.1]
+             if str(r["battery_status"]).lower() == "discharging" and _dist(r) > 1]
 
     st.markdown(f"""
       <div class="mv-head">
