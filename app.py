@@ -58,7 +58,7 @@ GPS_SQL = """
 select date_trunc('minute', source_timestamp) as minute,
        avg(latitude) as lat, avg(longitude) as lon, max(speed) as spd
 from {gtable}
-where device_id = {device} and source_date > '{since}'
+where device_id = {device} and source_date >= '{since}'
   and latitude between 5 and 40 and longitude between 60 and 100
 group by 1 order by 1
 """
@@ -66,7 +66,7 @@ group by 1 order by 1
 SQL_TEMPLATE = """
 with src as (
     select * from {table}
-    where device_id = {device} and source_date > '{since}' and bms_state between 1 and 3
+    where device_id = {device} and source_date >= '{since}' and bms_state between 1 and 3
 ),
 -- sessionize by time-ordered STATE CHANGES so sessions are sequential & never overlap:
 -- a new session starts whenever the state changes or there's a >4-min gap.
@@ -364,7 +364,7 @@ def session_html(r):
 # ----------------------------------------------------------------------------- controls
 c1, c2, _ = st.columns([1, 1, 6])
 device = c1.text_input("Device ID", value="13")
-since = c2.text_input("Since", value="2026-06-21")
+since = c2.text_input("Since", value="2026-06-23")
 
 # Fullscreen = the sessions board only, as a full-page overlay (toggled via ?fs=1).
 FULLSCREEN = st.query_params.get("fs") == "1"
