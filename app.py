@@ -419,8 +419,8 @@ st.markdown("""
          border-radius:8px;padding:5px 11px;white-space:nowrap;}
   .mv-fs:hover{border-color:var(--amber);color:var(--amber);}
   .sec-row{display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 12px;}
-  .sec-title{font-size:20px;font-weight:750;letter-spacing:-.3px;color:var(--t1);}
-  .sec-count{font-size:12px;color:var(--t3);}
+  .sec-title{font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif;font-size:20px;font-weight:750;letter-spacing:-.3px;color:var(--t1);}
+  .sec-count{font-family:'Bai Jamjuree',sans-serif;font-size:12px;color:var(--t3);}
   .past-card{background:#fff;border:.5px solid var(--border);border-radius:16px;overflow:hidden;
              box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 20px;}
   .past-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;font-family:'Bai Jamjuree',sans-serif;}
@@ -443,7 +443,7 @@ st.markdown("""
 # ----------------------------------------------------------------------------- controls
 c1, c2, _ = st.columns([1, 1, 6])
 device = c1.text_input("Device", value="13")
-since = c2.text_input("Since", value="2026-06-23")
+since = c2.text_input("Since", value="2026-06-29")
 
 FULLSCREEN = st.query_params.get("fs") == "1"
 if FULLSCREEN:
