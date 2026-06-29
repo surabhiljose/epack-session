@@ -224,7 +224,7 @@ LIVE_CARD = """
   .tmeta{font-size:12px;color:var(--t2);margin-top:3px;}
   .badge{background:var(--surface-2);color:var(--t2);border:.5px solid var(--border);border-radius:20px;
          padding:4px 12px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;}
-  .soc-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:end;margin-bottom:12px;}
+  .soc-row{display:flex;justify-content:center;align-items:end;gap:72px;margin-bottom:12px;}
   .soc-block{text-align:center;}
   .soc-lbl{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.10em;text-transform:uppercase;margin-bottom:6px;}
   .soc-num{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.04em;color:var(--t1);font-variant-numeric:tabular-nums;}
@@ -259,7 +259,6 @@ LIVE_CARD = """
       <div class="tid">__TID__</div>
       <div class="tmeta">__META__</div>
     </div>
-    <div class="badge">&#9660;&nbsp;Discharging</div>
   </div>
   <div class="soc-row">
     <div class="soc-block left"><div class="soc-lbl">SOC start</div><div class="soc-num">__SOC_S__<span class="soc-unit">%</span></div></div>
@@ -334,7 +333,7 @@ def render_live_card(r, gps, live):
     html = LIVE_CARD
     for k, v in repl.items():
         html = html.replace(k, v)
-    st.components.v1.html(html, height=660)
+    st.components.v1.html(html, height=590)
 
 
 PAST_TABLE = """
@@ -397,6 +396,9 @@ st.markdown("""
   [data-stale="true"] { opacity:1 !important; transition:none !important; filter:none !important; }
   .stApp { background:#F2F2F2; }
   .block-container { padding:1.6rem 2rem 3rem; max-width:880px; font-family:'Bai Jamjuree',-apple-system,'Segoe UI',sans-serif; }
+  /* tighten vertical spacing between the hero card, section title and table */
+  [data-testid="stVerticalBlock"]{gap:.35rem;}
+  .stApp iframe{display:block;}
   :root{--surface:#fff;--surface-2:#F7F7F7;--border:#E8E8E8;--border-mid:#CFCFCF;
         --t1:#212121;--t2:#666;--t3:#ADADAD;--brand:#FFB000;--amber:#CC8800;--amber-dim:rgba(255,176,0,.07);--mint:#88CCAE;--mint-shade:#2a7a5a;}
   .mv-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;
@@ -416,9 +418,9 @@ st.markdown("""
   .mv-fs{text-decoration:none;font-size:12px;font-weight:600;color:var(--t2);background:#fff;border:.5px solid var(--border);
          border-radius:8px;padding:5px 11px;white-space:nowrap;}
   .mv-fs:hover{border-color:var(--amber);color:var(--amber);}
-  .sec-row{display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px;}
-  .sec-title{font-size:13px;font-weight:700;color:var(--t1);}
-  .sec-count{font-size:11px;color:var(--t3);}
+  .sec-row{display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 12px;}
+  .sec-title{font-size:20px;font-weight:750;letter-spacing:-.3px;color:var(--t1);}
+  .sec-count{font-size:12px;color:var(--t3);}
   .past-card{background:#fff;border:.5px solid var(--border);border-radius:16px;overflow:hidden;
              box-shadow:0 1px 4px rgba(0,0,0,.05);padding:0 20px;}
   .past-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;font-family:'Bai Jamjuree',sans-serif;}
