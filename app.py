@@ -442,7 +442,7 @@ st.markdown("""
 
 # ----------------------------------------------------------------------------- controls
 c1, c2, _ = st.columns([1, 1, 6])
-device = c1.text_input("Device", value="13")
+device = c1.text_input("Device", value="22")
 since = c2.text_input("Since", value="2026-06-29")
 
 FULLSCREEN = st.query_params.get("fs") == "1"
